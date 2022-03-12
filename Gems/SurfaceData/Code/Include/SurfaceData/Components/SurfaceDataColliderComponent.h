@@ -12,6 +12,7 @@
 #include <AzCore/Component/Component.h>
 #include <AzCore/Component/TickBus.h>
 #include <AzCore/Component/TransformBus.h>
+#include <AzCore/std/parallel/shared_mutex.h>
 #include <AzFramework/Physics/ColliderComponentBus.h>
 
 #include <SurfaceData/SurfaceDataTypes.h>
@@ -81,13 +82,16 @@ namespace SurfaceData
         ////////////////////////////////////////////////////////////////////////
         // SurfaceDataProviderRequestBus
         void GetSurfacePoints(const AZ::Vector3& inPosition, SurfacePointList& surfacePointList) const override;
+        void GetSurfacePointsFromList(AZStd::span<const AZ::Vector3> inPositions, SurfacePointList& surfacePointList) const override;
 
         //////////////////////////////////////////////////////////////////////////
         // SurfaceDataModifierRequestBus
-        void ModifySurfacePoints(SurfacePointList& surfacePointList) const override;
+        void ModifySurfacePoints(
+            AZStd::span<const AZ::Vector3> positions,
+            AZStd::span<const AZ::EntityId> creatorEntityIds,
+            AZStd::span<SurfaceData::SurfaceTagWeights> weights) const override;
 
     private:
-        bool DoRayTrace(const AZ::Vector3& inPosition, bool queryPointOnly, AZ::Vector3& outPosition, AZ::Vector3& outNormal) const;
         void UpdateColliderData();
         void OnCompositionChanged();
 
@@ -98,7 +102,8 @@ namespace SurfaceData
 
         // cached data
         AZStd::atomic_bool m_refresh{ false };
-        mutable AZStd::recursive_mutex m_cacheMutex;
+        mutable AZStd::shared_mutex m_cacheMutex;
         AZ::Aabb m_colliderBounds = AZ::Aabb::CreateNull();
+        SurfaceTagWeights m_newPointWeights;
     };
 }
