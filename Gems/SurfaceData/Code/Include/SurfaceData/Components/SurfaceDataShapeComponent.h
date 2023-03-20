@@ -11,6 +11,7 @@
 #include <AzCore/Component/Component.h>
 #include <AzCore/Component/TickBus.h>
 #include <AzCore/Component/TransformBus.h>
+#include <AzCore/std/parallel/shared_mutex.h>
 #include <LmbrCentral/Shape/ShapeComponentBus.h>
 #include <SurfaceData/SurfaceDataModifierRequestBus.h>
 #include <SurfaceData/SurfaceDataProviderRequestBus.h>
@@ -28,7 +29,7 @@ namespace SurfaceData
         : public AZ::ComponentConfig
     {
     public:
-        AZ_CLASS_ALLOCATOR(SurfaceDataShapeConfig, AZ::SystemAllocator, 0);
+        AZ_CLASS_ALLOCATOR(SurfaceDataShapeConfig, AZ::SystemAllocator);
         AZ_RTTI(SurfaceDataShapeConfig, "{1EE196EF-8986-4A2B-B8DD-DA73F85CD597}", AZ::ComponentConfig);
         static void Reflect(AZ::ReflectContext* context);
         SurfaceTagVector m_providerTags;
@@ -64,11 +65,15 @@ namespace SurfaceData
 
         //////////////////////////////////////////////////////////////////////////
         // SurfaceDataProviderRequestBus
-        void GetSurfacePoints(const AZ::Vector3& inPosition, SurfacePointList& surfacePointList) const;
+        void GetSurfacePoints(const AZ::Vector3& inPosition, SurfacePointList& surfacePointList) const override;
+        void GetSurfacePointsFromList(AZStd::span<const AZ::Vector3> inPositions, SurfacePointList& surfacePointList) const override;
 
         //////////////////////////////////////////////////////////////////////////
         // SurfaceDataModifierRequestBus
-        void ModifySurfacePoints(SurfacePointList& surfacePointList) const override;
+        void ModifySurfacePoints(
+            AZStd::span<const AZ::Vector3> positions,
+            AZStd::span<const AZ::EntityId> creatorEntityIds,
+            AZStd::span<SurfaceData::SurfaceTagWeights> weights) const override;
 
         //////////////////////////////////////////////////////////////////////////
         // AZ::TransformNotificationBus
@@ -92,9 +97,10 @@ namespace SurfaceData
 
         // cached data
         AZStd::atomic_bool m_refresh{ false };
-        mutable AZStd::recursive_mutex m_cacheMutex;
+        mutable AZStd::shared_mutex m_cacheMutex;
         AZ::Aabb m_shapeBounds = AZ::Aabb::CreateNull();
         bool m_shapeBoundsIsValid = false;
         static const float s_rayAABBHeightPadding;
+        SurfaceTagWeights m_newPointWeights;
     };
 }

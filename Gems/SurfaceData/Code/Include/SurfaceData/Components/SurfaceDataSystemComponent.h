@@ -10,7 +10,9 @@
 
 #include <AzCore/Component/Component.h>
 #include <AzCore/Math/Aabb.h>
+#include <AzCore/std/parallel/shared_mutex.h>
 #include <SurfaceData/SurfaceDataSystemRequestBus.h>
+#include <SurfaceData/SurfaceDataTypes.h>
 
 namespace SurfaceData
 {
@@ -39,7 +41,19 @@ namespace SurfaceData
         ////////////////////////////////////////////////////////////////////////
         // SurfaceDataSystemRequestBus implementation
         void GetSurfacePoints(const AZ::Vector3& inPosition, const SurfaceTagVector& desiredTags, SurfacePointList& surfacePointList) const override;
-        void GetSurfacePointsFromRegion(const AZ::Aabb& inRegion, const AZ::Vector2 stepSize, const SurfaceTagVector& desiredTags, SurfacePointListPerPosition& surfacePointListPerPosition) const override;
+        void GetSurfacePointsFromRegion(
+            const AZ::Aabb& inRegion, const AZ::Vector2 stepSize, const SurfaceTagVector& desiredTags,
+            SurfacePointList& surfacePointListPerPosition) const override;
+        void GetSurfacePointsFromList(
+            AZStd::span<const AZ::Vector3> inPositions,
+            const SurfaceTagVector& desiredTags,
+            SurfacePointList& surfacePointLists) const override;
+
+        void GetSurfacePointsFromListInternal(
+            AZStd::span<const AZ::Vector3> inPositions,
+            const AZ::Aabb& inBounds,
+            const SurfaceTagVector& desiredTags,
+            SurfacePointList& surfacePointLists) const;
 
         SurfaceDataRegistryHandle RegisterSurfaceDataProvider(const SurfaceDataRegistryEntry& entry) override;
         void UnregisterSurfaceDataProvider(const SurfaceDataRegistryHandle& handle) override;
@@ -49,9 +63,27 @@ namespace SurfaceData
         void UnregisterSurfaceDataModifier(const SurfaceDataRegistryHandle& handle) override;
         void UpdateSurfaceDataModifier(const SurfaceDataRegistryHandle& handle, const SurfaceDataRegistryEntry& entry) override;
 
-        void RefreshSurfaceData(const AZ::Aabb& dirtyArea) override;
+        void RefreshSurfaceData(const SurfaceDataRegistryHandle& providerHandle, const AZ::Aabb& dirtyArea) override;
+
+        SurfaceDataRegistryHandle GetSurfaceDataProviderHandle(const AZ::EntityId& providerEntityId) override;
+        SurfaceDataRegistryHandle GetSurfaceDataModifierHandle(const AZ::EntityId& modifierEntityId) override;
+
     private:
-        void CombineSortAndFilterNeighboringPoints(SurfacePointList& sourcePointList, bool hasDesiredTags, const SurfaceTagVector& desiredTags) const;
+
+        using SurfaceDataRegistryMap = AZStd::unordered_map<SurfaceDataRegistryHandle, SurfaceDataRegistryEntry>;
+
+        // Get all the surface tags that can exist within the given bounds.
+        SurfaceTagSet GetTagsFromBounds(const AZ::Aabb& bounds, const SurfaceDataRegistryMap& registeredEntries) const;
+        // Get all the surface provider tags that can exist within the given bounds.
+        SurfaceTagSet GetProviderTagsFromBounds(const AZ::Aabb& bounds) const;
+        // Get all the surface modifier tags that can exist within the given bounds.
+        SurfaceTagSet GetModifierTagsFromBounds(const AZ::Aabb& bounds) const;
+
+        // Get all of the surface tags that can be affected by surface provider changes within the given bounds.
+        SurfaceTagSet GetAffectedSurfaceTags(const AZ::Aabb& bounds, const SurfaceTagVector& providerTags) const;
+
+        // Convert a SurfaceTagVector to a SurfaceTagSet.
+        SurfaceTagSet ConvertTagVectorToSet(const SurfaceTagVector& surfaceTags) const;
 
         SurfaceDataRegistryHandle RegisterSurfaceDataProviderInternal(const SurfaceDataRegistryEntry& entry);
         SurfaceDataRegistryEntry UnregisterSurfaceDataProviderInternal(const SurfaceDataRegistryHandle& handle);
@@ -61,9 +93,9 @@ namespace SurfaceData
         SurfaceDataRegistryEntry UnregisterSurfaceDataModifierInternal(const SurfaceDataRegistryHandle& handle);
         bool UpdateSurfaceDataModifierInternal(const SurfaceDataRegistryHandle& handle, const SurfaceDataRegistryEntry& entry, AZ::Aabb& oldBounds);
 
-        mutable AZStd::recursive_mutex m_registrationMutex;
-        AZStd::unordered_map<SurfaceDataRegistryHandle, SurfaceDataRegistryEntry> m_registeredSurfaceDataProviders;
-        AZStd::unordered_map<SurfaceDataRegistryHandle, SurfaceDataRegistryEntry> m_registeredSurfaceDataModifiers;
+        mutable AZStd::shared_mutex m_registrationMutex;
+        SurfaceDataRegistryMap m_registeredSurfaceDataProviders;
+        SurfaceDataRegistryMap m_registeredSurfaceDataModifiers;
         SurfaceDataRegistryHandle m_registeredSurfaceDataProviderHandleCounter = InvalidSurfaceDataRegistryHandle;
         SurfaceDataRegistryHandle m_registeredSurfaceDataModifierHandleCounter = InvalidSurfaceDataRegistryHandle;
         AZStd::unordered_set<AZ::u32> m_registeredModifierTags;
